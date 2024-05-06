@@ -29,8 +29,8 @@ class bcolors:
     BOLD = '\033[1m'
 
 # Constants
-DISPATCHER_URL = 'https://uk.epm.cyberark.com'
-MANAGER_URL = 'https://uk149.epm.cyberark.com'
+DISPATCHER_URL = 'https://XXX.epm.cyberark.com' # update to your dispatcher URL
+MANAGER_URL = 'https://XXX.epm.cyberark.com' # update to your manager URL
 LOLBAS_URL = 'https://lolbas-project.github.io'
 GTFOBINS_URL = 'https://gtfobins.github.io'
 VALIDATE_SSL = False # set to True if local certificate store is correctly configured
