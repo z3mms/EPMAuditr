@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # author: Tengku Zahasman
 
 import sys
