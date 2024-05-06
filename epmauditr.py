@@ -29,8 +29,8 @@ class bcolors:
     BOLD = '\033[1m'
 
 # Constants
-DISPATCHER_URL = 'https://XXX.epm.cyberark.com' # update to your dispatcher URL
-MANAGER_URL = 'https://XXX.epm.cyberark.com' # update to your manager URL
+DISPATCHER_URL = 'https://XXX.epm.cyberark.com' # update dispatcher url
+MANAGER_URL = 'https://XXX.epm.cyberark.com' # update manager url
 LOLBAS_URL = 'https://lolbas-project.github.io'
 GTFOBINS_URL = 'https://gtfobins.github.io'
 VALIDATE_SSL = False # set to True if local certificate store is correctly configured
@@ -223,6 +223,10 @@ def audit_policy(j):
             # check if location set
             if issue := check_location(location): 
                 issues.append(issue)
+            
+            # check if both location and publisher is not set
+            if (issue := check_loc_pub(publisher, location)):
+                issues.append(issue)
                                 
             # print results if there are issues
             if len(issues) > 0:
@@ -245,22 +249,29 @@ def check_pattern_numbers(patterns):
                 count = count+1
     #if len(patterns) < 3:
     if count < 3:
-        return f'[{plus}][{medium}] Less than 3 property definitions specified'
+        return {"p":2,"i":f'[{plus}][{medium}] Less than 3 property definitions specified'}
 
 # check if description is empty
 def check_description(description):
     if not description:
-        return f'[{plus}][{low}] Policy description is missing'
+        return {"p":3,"i":f'[{plus}][{low}] Policy description is missing'}
 
 # check child process
 def check_childprocess(value):
     if value:
-        return f'[{plus}][{high}] Child process is allowed to elevate'
+        return {"p":1,"i":f'[{plus}][{high}] Child process is allowed to elevate'}
 
 # check elevation for open save dialog
 def check_opensavedialog(value):
     if not value:
-        return f'[{plus}][{high}] Open Save Dialog is allowed to elevate'
+        return {"p":1,"i":f'[{plus}][{high}] Open Save Dialog is allowed to elevate'}
+
+# check if publisher not specified AND location either not specified or writable
+def check_loc_pub(publisher, location):
+    if publisher == "" and location == "":
+        return {"p":1,"i":f'[{plus}][{high}] Both Publisher AND Location not specified'}
+    elif publisher == "" and check_file_location_writable(location):
+        return {"p":1,"i":f'[{plus}][{high}] Publisher not specified AND Location is user writable'}
 
 # check if file is a known lolbas
 def check_lolbas(filename):
@@ -273,7 +284,7 @@ def check_lolbas(filename):
         result = True
     
     if result:    
-        return f'[{plus}][{high}] File is a known LOLBAS: '+filename
+        return {"p":1,"i":f'[{plus}][{high}] File is a known LOLBAS: '+filename}
 
 # check if file is a known gtfobins
 def check_gtfobins(filename):
@@ -286,55 +297,58 @@ def check_gtfobins(filename):
         result = True
     
     if result:
-        return f'[{plus}][{high}] File is a known GTFOBin: '+filename
+        return {"p":1,"i":f'[{plus}][{high}] File is a known GTFOBin: '+filename}
         
 # check if filepath contains wildcard
 def check_file_location_wildcard(filepath):
     if "*" in filepath:
-        return f'[{plus}][{medium}] File path contains wildcard: '+filepath  
+        return {"p":2,"i":f'[{plus}][{medium}] File path contains wildcard: '+filepath}
 
 # check if is potentially in writable location
 def check_file_location_writable(filepath):
-    if not ("c:\windows" in filepath.lower() or "c:\program files" in filepath.lower() or "%systemroot%" in filepath.lower() or "%programfiles%" in filepath.lower() or "%programfiles(x86)%" in filepath.lower()):
-        return f'[{plus}][{medium}] File potentially in user writable path: '+filepath+'\*'  
+    if not ("c:\windows" in filepath.lower() or "c:\program files" in filepath.lower() or "%systemroot%" in filepath.lower() or "%windir%" in filepath.lower() or "%programfiles%" in filepath.lower() or "%programfiles(x86)%" in filepath.lower()):
+        return {"p":2,"i":f'[{plus}][{medium}] File potentially in user writable path: '+filepath+'\*'}
         
 # check if file location include subfolders
 def check_file_withsubfolders(value, filepath):
     if value:
-        return f'[{plus}][{medium}] File location include subfolders: '+filepath+'\*'
+        return {"p":2,"i":f'[{plus}][{medium}] File location include subfolders: '+filepath+'\*'}
 
 # check if temporary installation files are protected
 def check_protectinstalledfiles(value):
     if not value:
-        return f'[{plus}][{medium}] Temporary installation files are not protected'
+        return {"p":2,"i":f'[{plus}][{medium}] Temporary installation files are not protected'}
 
 # check if temporary installation files are protected
 def check_linuxsudonopassword(value):
     if value:
-        return f'[{plus}][{high}] Sudo command does not require password'
+        return {"p":1,"i":f'[{plus}][{high}] Sudo command does not require password'}
 
 # check if filename contains wildcard
 def check_filename_wildcard(filename):
     if "*" in filename:
-        return f'[{plus}][{low}] Filename contains wildcard: '+filename
+        return {"p":3,"i":f'[{plus}][{low}] Filename contains wildcard: '+filename}
         
 # check if publisher is set
 def check_publisher(publisher):
     if not publisher or publisher == '':
-        return f'[{plus}][{info}] Publisher not specified'
+        return {"p":4,"i":f'[{plus}][{info}] Publisher not specified'}
 
 # check if location is specified
 def check_location(location):
     if not location or location == '':
-        return f'[{plus}][{info}] Location not specified'
+        return {"p":4,"i":f'[{plus}][{info}] Location not specified'}
         
 # output results
 def results(appname, issues):
     
     print(f"Application: {bcolors.BOLD}"+appname+f"{bcolors.ENDC}")
     
+    # sort issues by priority order
+    issues = sorted(issues, key=lambda x: x['p'])
+    
     for issue in issues:
-        print(issue)
+        print(issue['i'])
     print()
 
 # log into the API and retrieve auth token
