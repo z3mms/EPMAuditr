@@ -225,7 +225,7 @@ def audit_policy(j):
                 issues.append(issue)
             
             # check if both location and publisher is not set
-            if (issue := check_loc_pub(publisher, location)):
+            if (linux == 0 and (issue := check_loc_pub(publisher, location))):
                 issues.append(issue)
                                 
             # print results if there are issues
