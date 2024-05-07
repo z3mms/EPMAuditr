@@ -29,8 +29,8 @@ class bcolors:
     BOLD = '\033[1m'
 
 # Constants
-DISPATCHER_URL = 'https://XXX.epm.cyberark.com' # update dispatcher url
-MANAGER_URL = 'https://XXX.epm.cyberark.com' # update manager url
+DISPATCHER_URL = 'https://uk.epm.cyberark.com' # update dispatcher url
+MANAGER_URL = 'https://uk149.epm.cyberark.com' # update manager url
 LOLBAS_URL = 'https://lolbas-project.github.io'
 GTFOBINS_URL = 'https://gtfobins.github.io'
 VALIDATE_SSL = False # set to True if local certificate store is correctly configured
@@ -307,7 +307,7 @@ def check_file_location_wildcard(filepath):
 # check if is potentially in writable location
 def check_file_location_writable(filepath):
     if not ("c:\windows" in filepath.lower() or "c:\program files" in filepath.lower() or "%systemroot%" in filepath.lower() or "%windir%" in filepath.lower() or "%programfiles%" in filepath.lower() or "%programfiles(x86)%" in filepath.lower()):
-        return {"p":2,"i":f'[{plus}][{medium}] File potentially in user writable path: '+filepath+'\*'}
+        return {"p":2,"i":f'[{plus}][{medium}] File potentially in user writable path: '+filepath}
         
 # check if file location include subfolders
 def check_file_withsubfolders(value, filepath):
