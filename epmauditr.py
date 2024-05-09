@@ -29,8 +29,8 @@ class bcolors:
     BOLD = '\033[1m'
 
 # Constants
-DISPATCHER_URL = 'https://uk.epm.cyberark.com' # update dispatcher url
-MANAGER_URL = 'https://uk149.epm.cyberark.com' # update manager url
+DISPATCHER_URL = 'https://uk.epm.cyberark.com'
+MANAGER_URL = 'https://uk149.epm.cyberark.com'
 LOLBAS_URL = 'https://lolbas-project.github.io'
 GTFOBINS_URL = 'https://gtfobins.github.io'
 VALIDATE_SSL = False # set to True if local certificate store is correctly configured
@@ -40,6 +40,8 @@ high = f"{bcolors.RED}HIGH{bcolors.ENDC}"
 medium = f"{bcolors.ORANGE}MEDIUM{bcolors.ENDC}"
 low = f"{bcolors.YELLOW}LOW{bcolors.ENDC}"
 info = f"{bcolors.GRAY}INFO{bcolors.ENDC}"
+
+policyAction = {1:"Allow",2:"Block",3:"Elevate",4:"Elevate if necessary"}
 
 # load lolbas
 if not os.path.isfile('./lolbas.json'):
@@ -66,20 +68,46 @@ gtfobins_file.close()
 def audit_file(data):
 
     for policy in data['Policies']:
-        print("----------------------------")
+        
+        computers = ""
+        if policy['IsAppliedToAllComputers']:
+            computers = "All"
+        else:
+            for computer in policy['Executors']:
+                computers = computers + computer['Name'] + " "
+                
+        print(f"{bcolors.YELLOW}----------------------------")
         print('Policy: '+policy['Name'])
-        print("----------------------------")
+        print('Policy action: '+policyAction[policy['Action']])
+        print('Applies to: '+computers)
+        print('Active: '+str(policy['IsActive']))
+        print(f"----------------------------{bcolors.ENDC}")
         #print(policy)
-        for apps in policy['Applications']:
-            audit_policy(apps)
+        if policy['Action'] == 3 or policy['Action'] == 4:
+            for apps in policy['Applications']:
+                audit_elevation_policy(apps)
+        elif policy['Action'] == 2:
+            for apps in policy['Applications']:
+                audit_block_policy(apps)
+        elif policy['Action'] == 1:
+            for apps in appgroup['Applications']:
+                audit_allow_policy(apps)
         
     for appgroup in data['AppGroups']:
-        print("----------------------------")
-        print('Application Group: '+appgroup['Name'])
-        print("----------------------------")
+        print(f"{bcolors.YELLOW}----------------------------")
+        print('==> Application Group: '+appgroup['Name'])
+        print(f"----------------------------{bcolors.ENDC}")
         #print(policy)
-        for apps in appgroup['Applications']:
-            audit_policy(apps)
+        if policy['Action'] == 3 or policy['Action'] == 4:
+            for apps in appgroup['Applications']:
+                audit_elevation_policy(apps)
+        elif policy['Action'] == 2:
+            for apps in appgroup['Applications']:
+                audit_block_policy(apps)
+        elif policy['Action'] == 1:
+            for apps in appgroup['Applications']:
+                audit_allow_policy(apps)
+
                         
 
 # audit policies from api
@@ -88,22 +116,41 @@ def audit_api(authToken, setId, data):
     policy = data['Policy']
     banner = 1
     
+    computers = ""
+    if policy['IsAppliedToAllComputers']:
+        computers = "All"
+    else:
+        for computer in policy['Executors']:
+            computers = computers + computer['Name'] + " "   
+    
     for apps in policy['Applications']:
+    
+        if banner == 1:
+            print(f"{bcolors.YELLOW}----------------------------")
+            print('Policy: '+policy['Name'])
+            print('Policy action: '+policyAction[policy['Action']])
+            print('Applies to: '+computers)
+            print(f"----------------------------{bcolors.ENDC}")
+            banner = 0
+        if policy['Action'] == 3 or policy['Action'] == 4:
+            audit_elevation_policy(apps)
+        elif policy['Action'] == 2:
+            audit_block_policy(apps)
+        elif policy['Action'] == 1:
+            audit_allow_policy(apps)
+            
         if apps['applicationType'] == 2:        
             appgroup = getAppGroupDetails(authToken, setId, apps['id'])
-            print("----------------------------")
-            print('Application Group: '+appgroup['Policy']['Name'])
-            print("----------------------------")
+            print(f"{bcolors.YELLOW}----------------------------")
+            print('==> Application Group: '+appgroup['Policy']['Name'])
+            print(f"----------------------------{bcolors.ENDC}")
             for apps in appgroup['Policy']['Applications']:                
-                audit_policy(apps) 
-        else:
-            if banner == 1:
-                print("----------------------------")
-                print('Policy: '+policy['Name'])
-                print("----------------------------")
-                banner = 0
-            audit_policy(apps)
-            banner = 1
+                if policy['Action'] == 3 or policy['Action'] == 4:
+                    audit_elevation_policy(apps)
+                elif policy['Action'] == 2:
+                    audit_block_policy(apps)
+                elif policy['Action'] == 1:
+                    audit_allow_policy(apps)  
     
     print("\nWhat would you like to do?")
     print("1. Check another policy in the same set")
@@ -122,25 +169,209 @@ def audit_api(authToken, setId, data):
     else:
         exit("Goodbye!")
                         
-
-def audit_policy(j):
+# audit elevation policy
+def audit_elevation_policy(j):
     
-        if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+        appname = ""
+        arguments = ""
+        command = ""
+        location = ""
+        publisher = ""
+        linux = 0
+        issues = []
+        
+        # check if linux
+        if 'LinuxChildProcess' in j:
+            linux = 1
+        else:
+            linux = 0
+        
+        # determine filename if available
+        for key, value in j['patterns'].items():
+            if key == 'ORIGINAL_FILE_NAME':
+                for a, b in value.items():
+                    if a == 'content' and b != '' and appname == '':
+                        appname = b
+            if key == 'FILE_NAME':
+                for a, b in value.items():
+                    if a == 'content' and b != '':
+                        appname = b
+            if key == 'ARGUMENTS':
+                for a, b in value.items():
+                    if a == 'content' and b != '':                            
+                        arguments = b
+        if arguments != "" and appname != "":
+            command = appname+" "+arguments
+        elif appname == "":
+            appname = j['id']
+        
+        # detect command shells
+        if issue := check_commandshells(appname):
+            issues.append(issue)
+        
+        # check child process
+        if 'childProcess' in j and (j['applicationType'] != 5 and "setup" not in appname.lower() and "install" not in appname.lower()) and (issue := check_childprocess(j['childProcess'])):
+            issues.append(issue)
+        
+        # check Linux child command
+        if 'LinuxChildProcess' in j and (issue := check_childprocess(j['LinuxChildProcess'])):
+            issues.append(issue)
+        
+        # check elevation for open save dialog
+        if 'restrictOpenSaveFileDialog' in j and (issue := check_opensavedialog(j['restrictOpenSaveFileDialog'])) and j['applicationType'] == 3: 
+            issues.append(issue)
+        
+        # check if password required to run sudo commands
+        if 'linuxSudoNoPassword' in j and (issue := check_linuxsudonopassword(j['linuxSudoNoPassword'])): 
+            issues.append(issue)
+        
+        # check if file is a known lolbas
+        if linux == 0 and (issue := check_lolbas(appname)):
+            issues.append(issue)
+        
+        # check if file is a known gtfobins
+        if linux == 1 and (issue := check_gtfobins(appname)):
+            issues.append(issue)
+        
+        # check if temporary installation files are protected
+        if 'protectInstalledFiles' in j and (j['applicationType'] == 5 or "setup" in appname.lower() or "install" in appname.lower()) and (issue := check_protectinstalledfiles(j['protectInstalledFiles'])) and linux == 0: 
+            issues.append(issue)
+        
+        # check number of patterns
+        if 'patterns' in j and (issue := check_pattern_numbers(j['patterns'], False)): 
+            issues.append(issue)
+            
+        for key, value in j['patterns'].items():
+            if key == 'LOCATION':
+                for a, b in value.items():
+                    if a == 'content' and b != '':
+                        location = b
+                        if issue := check_file_location_wildcard(location): # check if file location contains wildcard
+                            issues.append(issue)
+                        if (issue := check_file_location_writable(location)) and linux == 0: # check if file is potentially in writable path
+                            issues.append(issue)
+                    if a == 'withSubfolders':
+                        if (issue := check_file_withsubfolders(b,location)) and location != '': # check with subfolders
+                            issues.append(issue)
+            if key == 'PUBLISHER':
+                for a, b in value.items():
+                    if a == 'content' and b != '':
+                        publisher = b                            
+        
+        # check wildcard in filename
+        if issue := check_filename_wildcard(appname):
+            issues.append(issue)
+        
+        # check if description is set
+        if 'description' in j and (issue := check_description(j['description'])): 
+            issues.append(issue)
+        
+        # check if publisher set
+        if (issue := check_publisher(publisher)) and linux == 0: 
+            issues.append(issue)
+        
+        # check if location set
+        if issue := check_location(location, False): 
+            issues.append(issue)
+        
+        # check if both location and publisher is not set
+        if (linux == 0 and (issue := check_loc_pub(publisher, location))):
+            issues.append(issue)
+                            
+        # print results if there are issues
+        if len(issues) > 0:
+            if command != "":
+                results(command, issues)
+            else:
+                results(appname, issues)
+
+#audit block policy
+def audit_block_policy(j):
+    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+        appname = ""
+        arguments = ""
+        command = ""
+        location = ""
+        publisher = ""
+        runas = ""
+        linux = 0
+        issues = []
+        
+        # check if linux
+        if 'LinuxChildProcess' in j:
+            linux = 1
+        else:
+            linux = 0
+        
+        # determine filename, arguments and runas user if available
+        for key, value in j['patterns'].items():
+            if key == 'ORIGINAL_FILE_NAME':
+                for a, b in value.items():
+                    if a == 'content' and b != '' and appname == '':
+                        appname = b
+            if key == 'FILE_NAME':
+                for a, b in value.items():
+                    if a == 'content' and b != '':
+                        appname = b
+            if key == 'ARGUMENTS':
+                for a, b in value.items():
+                    if a == 'content' and b != '':                            
+                        arguments = b
+            if key == 'LINUX_RUN_AS_USER':
+                for a, b in value.items():
+                    if a == 'users' and b != '':                            
+                        runas = b
+        if arguments != "" and appname != "":
+            command = appname+" "+arguments
+        elif appname == "":
+            appname = j['id']
+        
+        # determine location if set
+        for key, value in j['patterns'].items():
+            if key == 'LOCATION':
+                for a, b in value.items():
+                    if a == 'content' and b != '':
+                        location = b
+        
+        # check if location set
+        if runas != ['root'] and (issue := check_location(location, True)):
+            issues.append(issue)
+            
+        # check if description is set
+        if 'description' in j and (issue := check_description(j['description'])): 
+            issues.append(issue)
+        
+        # check number of patterns if more than 3
+        if 'patterns' in j and (issue := check_pattern_numbers(j['patterns'], True)): 
+            issues.append(issue)
+        
+        # print results if there are issues
+        if len(issues) > 0:
+            if command != "":
+                results(command, issues)
+            else:
+                results(appname, issues)
+
+#audit allow policy
+def audit_allow_policy(j):
+
+    appname = ""
+    arguments = ""
+    command = ""
+    location = ""
+    publisher = ""
+    runas = ""
+    linux = 0
+    issues = []
+    
+    if (j['applicationType'] == 3 or j['applicationType'] == 4 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
             appname = ""
             arguments = ""
             command = ""
-            location = ""
-            publisher = ""
-            linux = 0
             issues = []
             
-            # check if linux
-            if 'LinuxChildProcess' in j:
-                linux = 1
-            else:
-                linux = 0
-            
-            # determine filename if available
+            # determine filename, arguments and runas user if available
             for key, value in j['patterns'].items():
                 if key == 'ORIGINAL_FILE_NAME':
                     for a, b in value.items():
@@ -158,120 +389,62 @@ def audit_policy(j):
                 command = appname+" "+arguments
             elif appname == "":
                 appname = j['id']
-            
-            # check child process
-            if 'childProcess' in j and (j['applicationType'] != 5 and "setup" not in appname.lower() and "install" not in appname.lower()) and (issue := check_childprocess(j['childProcess'])):
-                issues.append(issue)
-            
-            # check Linux child command
-            if 'LinuxChildProcess' in j and (issue := check_childprocess(j['LinuxChildProcess'])):
-                issues.append(issue)
-            
-            # check elevation for open save dialog
-            if 'restrictOpenSaveFileDialog' in j and (issue := check_opensavedialog(j['restrictOpenSaveFileDialog'])) and j['applicationType'] == 3: 
-                issues.append(issue)
-            
-            # check if password required to run sudo commands
-            if 'linuxSudoNoPassword' in j and (issue := check_linuxsudonopassword(j['linuxSudoNoPassword'])): 
-                issues.append(issue)
-            
-            # check if file is a known lolbas
-            if linux == 0 and (issue := check_lolbas(appname)):
-                issues.append(issue)
-            
-            # check if file is a known gtfobins
-            if linux == 1 and (issue := check_gtfobins(appname)):
-                issues.append(issue)
-            
-            # check if temporary installation files are protected
-            if 'protectInstalledFiles' in j and (j['applicationType'] == 5 or "setup" in appname.lower() or "install" in appname.lower()) and (issue := check_protectinstalledfiles(j['protectInstalledFiles'])) and linux == 0: 
-                issues.append(issue)
-            
-            # check number of patterns
-            if 'patterns' in j and (issue := check_pattern_numbers(j['patterns'])): 
-                issues.append(issue)
-                
-            for key, value in j['patterns'].items():
-                if key == 'LOCATION':
-                    for a, b in value.items():
-                        if a == 'content' and b != '':
-                            location = b
-                            if issue := check_file_location_wildcard(location): # check if file location contains wildcard
-                                issues.append(issue)
-                            if (issue := check_file_location_writable(location)) and linux == 0: # check if file is potentially in writable path
-                                issues.append(issue)
-                        if a == 'withSubfolders':
-                            if (issue := check_file_withsubfolders(b,location)) and location != '': # check with subfolders
-                                issues.append(issue)
-                if key == 'PUBLISHER':
-                    for a, b in value.items():
-                        if a == 'content' and b != '':
-                            publisher = b                            
-            
-            # check wildcard in filename
-            if issue := check_filename_wildcard(appname):
-                issues.append(issue)
-            
+
             # check if description is set
             if 'description' in j and (issue := check_description(j['description'])): 
                 issues.append(issue)
-            
-            # check if publisher set
-            if (issue := check_publisher(publisher)) and linux == 0: 
-                issues.append(issue)
-            
-            # check if location set
-            if issue := check_location(location): 
-                issues.append(issue)
-            
-            # check if both location and publisher is not set
-            if (linux == 0 and (issue := check_loc_pub(publisher, location))):
-                issues.append(issue)
-                                
+
             # print results if there are issues
             if len(issues) > 0:
                 if command != "":
                     results(command, issues)
                 else:
                     results(appname, issues)
-        #except:
-        #    return 0
-
+    
 # audit rules #
 
 # check that minimum patterns are at least 3
-def check_pattern_numbers(patterns):
+def check_pattern_numbers(patterns, block):
     # count patterns with values
     count = 0
     for key, value in patterns.items():
         for a, b in value.items():
-            if a == 'isEmpty' and b != True:
+            if a == 'isEmpty' and b == False:
                 count = count+1
     #if len(patterns) < 3:
-    if count < 3:
-        return {"p":2,"i":f'[{plus}][{medium}] Less than 3 property definitions specified'}
+    if count < 3 and not block:
+        return {"p":2,"i":f'[{plus}] [{medium}] Less than 3 property definitions specified'}
+    elif count > 3 and block:
+        return {"p":2,"i":f'[{plus}] [{medium}] More than 3 property definitions specified'}
+        
 
 # check if description is empty
 def check_description(description):
     if not description:
-        return {"p":3,"i":f'[{plus}][{low}] Policy description is missing'}
+        return {"p":3,"i":f'[{plus}] [{low}] Policy description is missing'}
 
 # check child process
 def check_childprocess(value):
     if value:
-        return {"p":1,"i":f'[{plus}][{high}] Child process is allowed to elevate'}
+        return {"p":1,"i":f'[{plus}] [{high}] Child process is allowed to elevate'}
+
+# detect command shells
+def check_commandshells(value):
+    value = value.lower()
+    if value == "cmd.exe" or value == "powershell.exe" or value == "powershell_ise.exe" or value == "pwsh.exe" or value == "windowsterminal.exe" or value == "wt.exe" or value == "bash" or value == "sh" or value == "zsh":
+        return {"p":1,"i":f'[{plus}] [{high}] Command shell is elevated'}
 
 # check elevation for open save dialog
 def check_opensavedialog(value):
     if not value:
-        return {"p":1,"i":f'[{plus}][{high}] Open Save Dialog is allowed to elevate'}
+        return {"p":1,"i":f'[{plus}] [{high}] Open Save Dialog is allowed to elevate'}
 
 # check if publisher not specified AND location either not specified or writable
 def check_loc_pub(publisher, location):
     if publisher == "" and location == "":
-        return {"p":1,"i":f'[{plus}][{high}] Both Publisher AND Location not specified'}
+        return {"p":1,"i":f'[{plus}] [{high}] Both Publisher AND Location not specified'}
     elif publisher == "" and check_file_location_writable(location):
-        return {"p":1,"i":f'[{plus}][{high}] Publisher not specified AND Location is user writable'}
+        return {"p":1,"i":f'[{plus}] [{high}] Publisher not specified AND Location is user writable'}
 
 # check if file is a known lolbas
 def check_lolbas(filename):
@@ -284,7 +457,7 @@ def check_lolbas(filename):
         result = True
     
     if result:    
-        return {"p":1,"i":f'[{plus}][{high}] File is a known LOLBAS: '+filename}
+        return {"p":1,"i":f'[{plus}] [{high}] File is a known LOLBAS: '+filename}
 
 # check if file is a known gtfobins
 def check_gtfobins(filename):
@@ -297,47 +470,49 @@ def check_gtfobins(filename):
         result = True
     
     if result:
-        return {"p":1,"i":f'[{plus}][{high}] File is a known GTFOBin: '+filename}
+        return {"p":1,"i":f'[{plus}] [{high}] File is a known GTFOBin: '+filename}
         
 # check if filepath contains wildcard
 def check_file_location_wildcard(filepath):
     if "*" in filepath:
-        return {"p":2,"i":f'[{plus}][{medium}] File path contains wildcard: '+filepath}
+        return {"p":2,"i":f'[{plus}] [{medium}] File path contains wildcard: '+filepath}
 
 # check if is potentially in writable location
 def check_file_location_writable(filepath):
     if not ("c:\windows" in filepath.lower() or "c:\program files" in filepath.lower() or "%systemroot%" in filepath.lower() or "%windir%" in filepath.lower() or "%programfiles%" in filepath.lower() or "%programfiles(x86)%" in filepath.lower()):
-        return {"p":2,"i":f'[{plus}][{medium}] File potentially in user writable path: '+filepath}
+        return {"p":2,"i":f'[{plus}] [{medium}] File potentially in user writable path: '+filepath}
         
 # check if file location include subfolders
 def check_file_withsubfolders(value, filepath):
     if value:
-        return {"p":2,"i":f'[{plus}][{medium}] File location include subfolders: '+filepath+'\*'}
+        return {"p":2,"i":f'[{plus}] [{medium}] File location include subfolders: '+filepath+'\*'}
 
 # check if temporary installation files are protected
 def check_protectinstalledfiles(value):
     if not value:
-        return {"p":2,"i":f'[{plus}][{medium}] Temporary installation files are not protected'}
+        return {"p":2,"i":f'[{plus}] [{medium}] Temporary installation files are not protected'}
 
 # check if temporary installation files are protected
 def check_linuxsudonopassword(value):
     if value:
-        return {"p":1,"i":f'[{plus}][{high}] Sudo command does not require password'}
+        return {"p":1,"i":f'[{plus}] [{high}] Sudo command does not require password'}
 
 # check if filename contains wildcard
 def check_filename_wildcard(filename):
     if "*" in filename:
-        return {"p":3,"i":f'[{plus}][{low}] Filename contains wildcard: '+filename}
+        return {"p":3,"i":f'[{plus}] [{low}] Filename contains wildcard: '+filename}
         
 # check if publisher is set
 def check_publisher(publisher):
     if not publisher or publisher == '':
-        return {"p":4,"i":f'[{plus}][{info}] Publisher not specified'}
+        return {"p":4,"i":f'[{plus}] [{info}] Publisher not specified'}
 
 # check if location is specified
-def check_location(location):
-    if not location or location == '':
-        return {"p":4,"i":f'[{plus}][{info}] Location not specified'}
+def check_location(location, block):
+    if (not location or location == '') and not block:
+        return {"p":4,"i":f'[{plus}] [{info}] Location not specified'}
+    elif (location or location != '') and block:
+        return {"p":1,"i":f'[{plus}] [{high}] Location specified for blocked command: '+location}
         
 # output results
 def results(appname, issues):
@@ -370,7 +545,7 @@ def chooseEPMSet(authToken):
     if len(r.json()['Sets']) < 1:
         print("There are no sets available to audit. Exiting...")
         exit("Goodbye!")
-    count = 0
+    count = 1
     print('\nThese are the available sets:')
     for i in r.json()['Sets']:
         print(f'{count}. ' + i['Name'])
@@ -378,7 +553,7 @@ def chooseEPMSet(authToken):
         count=count+1
     print('\nWhich set would you like to audit?')
     choice = int(input('Choice>> '))
-    return sets[choice]
+    return sets[choice-1]
 
 # list and choose EPM policy to audit
 def choosePolicy(authToken, setId):
@@ -394,15 +569,18 @@ def choosePolicy(authToken, setId):
         policyid = choosePolicy(authToken, epmsetid)
         policy = getPolicyDetails(authToken, epmsetid, policyid)
         audit_api(authToken, epmsetid, policy)
-    count = 0
+    count = 1
     print('\nThese are the available policies to audit:')
     for i in r.json()['Policies']:
-        print(f'{count}. ' + i['PolicyName'])
+        if i['IsActive']:
+            print(f'{count}. ' + i['PolicyName'])
+        else:
+            print(f'{bcolors.GRAY}{count}. ' + i['PolicyName'] + f' (not active){bcolors.ENDC}')
         policies.append(i['PolicyId'])
         count=count+1
     print('\nWhich policy would you like to audit?')
     choice = int(input('Choice>> '))
-    return policies[choice]
+    return policies[choice-1]
 
 # obtain policy details
 def getPolicyDetails(authToken, setId, policyId):
@@ -421,14 +599,14 @@ def getAppGroupDetails(authToken, setId, appGroupId):
         
     
 
-print("""
+print(f"""{bcolors.CYAN}
   _____ ____  __  __      _             _ _ _        
  | ____|  _ \|  \/  |    / \  _   _  __| (_) |_ _ __ 
  |  _| | |_) | |\/| |   / _ \| | | |/ _` | | __| '__|
  | |___|  __/| |  | |  / ___ \ |_| | (_| | | |_| |   
  |_____|_|   |_|  |_| /_/   \_\__,_|\__,_|_|\__|_| v0.1beta  
                                                      
-""")
+{bcolors.ENDC}""")
 
 if len(sys.argv) > 1 and sys.argv[1] == "--file":
     print("Auditing policy from file: "+sys.argv[2])
@@ -438,7 +616,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--file":
     f.close()
 elif len(sys.argv) > 1 and sys.argv[1] == "--api":
     print("Auditing policy from API: "+MANAGER_URL)
-    print("Please enter EPM API credentials.")
+    print("Please enter EPM API credentials.\n")
     authToken = getAuthToken()
     epmsetid = chooseEPMSet(authToken)
     policyid = choosePolicy(authToken, epmsetid)
@@ -505,3 +683,4 @@ else:
 #        13 = "Advanced Mac"
 #        18 = "Predefined App Groups Win"
 #        20 = "Developer Applications"
+
