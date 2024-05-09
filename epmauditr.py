@@ -130,6 +130,7 @@ def audit_api(authToken, setId, data):
             print('Policy: '+policy['Name'])
             print('Policy action: '+policyAction[policy['Action']])
             print('Applies to: '+computers)
+            print('Active: '+str(policy['IsActive']))
             print(f"----------------------------{bcolors.ENDC}")
             banner = 0
         if policy['Action'] == 3 or policy['Action'] == 4:
@@ -575,7 +576,7 @@ def choosePolicy(authToken, setId):
         if i['IsActive']:
             print(f'{count}. ' + i['PolicyName'])
         else:
-            print(f'{bcolors.GRAY}{count}. ' + i['PolicyName'] + f' (not active){bcolors.ENDC}')
+            print(f'{bcolors.GRAY}{count}. ' + i['PolicyName'] + f' (disabled){bcolors.ENDC}')
         policies.append(i['PolicyId'])
         count=count+1
     print('\nWhich policy would you like to audit?')
