@@ -6,8 +6,10 @@ import json
 import requests
 import os.path
 import getpass
+from datetime import date
 import urllib3
 urllib3.disable_warnings()
+import msal
 
 class bcolors:
     RED = '\033[31m'
@@ -29,8 +31,8 @@ class bcolors:
     BOLD = '\033[1m'
 
 # Constants
-DISPATCHER_URL = 'https://uk.epm.cyberark.com'
-MANAGER_URL = 'https://uk149.epm.cyberark.com'
+DISPATCHER_URL = 'https://XXXX.epm.cyberark.com'
+MANAGER_URL = 'https://XXXX.epm.cyberark.com'
 LOLBAS_URL = 'https://lolbas-project.github.io'
 GTFOBINS_URL = 'https://gtfobins.github.io'
 VALIDATE_SSL = False # set to True if local certificate store is correctly configured
@@ -51,6 +53,7 @@ if not os.path.isfile('./lolbas.json'):
 lolbas_file = open('lolbas.json')
 lolbas_data = json.load(lolbas_file)
 lolbas = []
+
 for i in lolbas_data:
     lolbas.append(i['Name'].lower())
 lolbas_file.close()
@@ -173,7 +176,7 @@ def audit_api(authToken, setId, data):
 # audit elevation policy
 def audit_elevation_policy(j):
     
-    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 22 or j['applicationType'] == 28):
         appname = ""
         arguments = ""
         command = ""
@@ -236,7 +239,7 @@ def audit_elevation_policy(j):
             issues.append(issue)
         
         # check if temporary installation files are protected
-        if 'protectInstalledFiles' in j and (j['applicationType'] == 5 or "setup" in appname.lower() or "install" in appname.lower()) and (issue := check_protectinstalledfiles(j['protectInstalledFiles'])) and linux == 0: 
+        if 'protectInstalledFiles' in j and (j['applicationType'] == 3 and (".msi" in appname.lower() or "setup" in appname.lower() or "install" in appname.lower())) and (issue := check_protectinstalledfiles(j['protectInstalledFiles'])) and linux == 0: 
             issues.append(issue)
         
         # check number of patterns
@@ -289,7 +292,7 @@ def audit_elevation_policy(j):
 
 #audit block policy
 def audit_block_policy(j):
-    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+    if (j['applicationType'] == 3 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 22 or j['applicationType'] == 28):
         appname = ""
         arguments = ""
         command = ""
@@ -366,7 +369,7 @@ def audit_allow_policy(j):
     linux = 0
     issues = []
     
-    if (j['applicationType'] == 3 or j['applicationType'] == 4 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 28):
+    if (j['applicationType'] == 3 or j['applicationType'] == 4 or j['applicationType'] == 5 or j['applicationType'] == 15 or j['applicationType'] == 21 or j['applicationType'] == 22 or j['applicationType'] == 28):
             appname = ""
             arguments = ""
             command = ""
@@ -401,7 +404,35 @@ def audit_allow_policy(j):
                     results(command, issues)
                 else:
                     results(appname, issues)
+
+# retrieve admin audit log by date
+def audit_adminlogs(authToken, dateFrom):
+    url = MANAGER_URL + "/EPM/API/Account/AdminAudit?limit=500&DateFrom=" + dateFrom
+    headers = {'Authorization': 'basic '+authToken, 'Content-type': 'application/json'}
+    r = requests.get(url=url, headers=headers, verify=VALIDATE_SSL)
+    print(f"{bcolors.BOLD}\nShowing admin audit logs from:{bcolors.ENDC} " + dateFrom + "\n")
+    for i in r.json()['AdminAudits']:
+        print(f'{bcolors.YELLOW}'+i['Administrator'] + f"{bcolors.ENDC} | " + i['Description'] + " | " + i['EventTime'])
+
+def audit_setadminlogs(authToken, setId, dateFrom):
+    url = MANAGER_URL + "/EPM/API/Sets/"+ setId +"/AdminAudit?limit=500&DateFrom=" + dateFrom
+    headers = {'Authorization': 'basic '+authToken, 'Content-type': 'application/json'}
+    r = requests.get(url=url, headers=headers, verify=VALIDATE_SSL)
+    print(f"{bcolors.BOLD}\nShowing set admin audit logs from:{bcolors.ENDC} " + dateFrom + "\n")
+    for i in r.json()['AdminAudits']:
+        alert = ''
+        if 'Generated token' in i['Description'] and ('for all computers' in i['Description'] or 'valid till 31/12/9999' in i['Description']):
+            alert = f'{bcolors.RED}[WARNING]{bcolors.ENDC} '
+        print(f'{bcolors.YELLOW}'+i['Administrator'] + f"{bcolors.ENDC} | " + alert + i['Description'] + " | " + i['EventTime'])
     
+    epmsetid = chooseEPMSet(authToken)
+    print("\nPlease enter date for the log to be retrieved from: ")
+    newDateFrom = input('Date (eg: ' +str(date.today())+'): ')
+    if not newDateFrom:
+        newDateFrom = str(date.today())    
+    audit_setadminlogs(authToken, epmsetid, newDateFrom)
+
+
 # audit rules #
 
 # check that minimum patterns are at least 3
@@ -593,10 +624,12 @@ def getPolicyDetails(authToken, setId, policyId):
 
 # obtain application group details
 def getAppGroupDetails(authToken, setId, appGroupId):
-    url = MANAGER_URL + "/EPM/API/Sets/"+setId+"/Policies/ApplicationGroups/"+appGroupId
+    url = MANAGER_URL + "/EPM/API/Sets/"+setId+"/Policies/ApplicationGroups/"+appGroupId 
     headers = {'Authorization': 'basic '+authToken, 'Content-type': 'application/json'}
     r = requests.get(url=url, headers=headers, verify=VALIDATE_SSL)
     return r.json()
+
+
         
     
 
@@ -623,10 +656,30 @@ elif len(sys.argv) > 1 and sys.argv[1] == "--api":
     policyid = choosePolicy(authToken, epmsetid)
     policy = getPolicyDetails(authToken, epmsetid, policyid)
     audit_api(authToken, epmsetid, policy)
+elif len(sys.argv) > 1 and sys.argv[1] == "--logs":
+    print("Retrieving audit logs from API: "+MANAGER_URL)
+    print("Please enter EPM API credentials.\n")
+    authToken = getAuthToken()
+        
+    if sys.argv[2] == 'admin':  
+        print("\nPlease enter date for the log to be retrieved from: ")
+        dateFrom = input('Date (eg: ' +str(date.today())+'): ')
+        if not dateFrom:
+            dateFrom = str(date.today())        
+        audit_adminlogs(authToken, dateFrom)
+    elif sys.argv[2] == 'sets':
+        epmsetid = chooseEPMSet(authToken)
+        print("\nPlease enter date for the log to be retrieved from: ")
+        dateFrom = input('Date (eg: ' +str(date.today())+'): ')
+        if not dateFrom:
+            dateFrom = str(date.today())        
+        audit_setadminlogs(authToken, epmsetid, dateFrom)
+        
 else:
     print("""Usage: 
     ./epmaudit.py --file <filename.epmp>
     ./epmaudit.py --api
+    ./epmaudit.py --logs [admin|sets]
     """)
 
 
@@ -650,6 +703,7 @@ else:
 #        19 = "Optical Disc2"
 #        20 = "WinApp"
 #        21 = "DLL"
+#        22 = "PKG"
 #        28 = "Linux command"
 #
 # CompareAs type        
@@ -684,4 +738,3 @@ else:
 #        13 = "Advanced Mac"
 #        18 = "Predefined App Groups Win"
 #        20 = "Developer Applications"
-
