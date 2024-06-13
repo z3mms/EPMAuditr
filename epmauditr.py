@@ -9,7 +9,6 @@ import getpass
 from datetime import date
 import urllib3
 urllib3.disable_warnings()
-import msal
 
 class bcolors:
     RED = '\033[31m'
